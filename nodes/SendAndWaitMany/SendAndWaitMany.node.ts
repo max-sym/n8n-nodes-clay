@@ -85,7 +85,7 @@ export class SendAndWaitMany implements INodeType {
 				displayName: 'Callback Field Name',
 				name: 'callbackFieldName',
 				type: 'string',
-				default: 'callback',
+				default: 'resume_url',
 				required: true,
 				description: 'Field name to send callback URL in each outbound request body',
 			},

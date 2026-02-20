@@ -16,8 +16,9 @@
 		"url": "https://github.com/coderstein/n8n-nodes-clay.git"
 	},
 	"scripts": {
-		"build": "n8n-node build",
+		"build": "n8n-node build && npm run copy:icons",
 		"build:watch": "tsc --watch",
+		"copy:icons": "mkdir -p dist/nodes/SendAndWaitMany && cp nodes/SendAndWaitMany/*.svg dist/nodes/SendAndWaitMany/",
 		"dev": "n8n-node dev",
 		"lint": "n8n-node lint",
 		"lint:fix": "n8n-node lint --fix",

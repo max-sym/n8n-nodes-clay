@@ -1,5 +1,6 @@
 import type {
 	IAuthenticateGeneric,
+	Icon,
 	ICredentialTestRequest,
 	ICredentialType,
 	INodeProperties,
@@ -9,6 +10,8 @@ export class N8nApi implements ICredentialType {
 	name = 'sendAndWaitManyN8nApi';
 
 	displayName = 'n8n API';
+
+	icon = 'file:clay.svg' as Icon;
 
 	documentationUrl = 'https://docs.n8n.io/api/authentication/';
 
