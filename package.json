@@ -1,6 +1,6 @@
 {
 	"name": "@maxim_chu/n8n-nodes-clay",
-	"version": "0.1.1",
+	"version": "1.0.0",
 	"description": "n8n node for Clay",
 	"license": "MIT",
 	"homepage": "https://github.com/coderstein/n8n-nodes-clay",
