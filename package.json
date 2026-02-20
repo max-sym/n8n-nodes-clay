@@ -1,5 +1,5 @@
 {
-	"name": "n8n-nodes-clay",
+	"name": "@maxim_chu/n8n-nodes-clay",
 	"version": "0.1.1",
 	"description": "n8n node for Clay",
 	"license": "MIT",
