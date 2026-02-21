@@ -6,7 +6,8 @@ export type ExecutionAggregateState = {
 	createdAt: number;
 };
 
-const MAX_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
+const CACHE_HOURS = 1;
+const MAX_CACHE_AGE_MS = CACHE_HOURS * 60 * 60 * 1000;
 const aggregateCache = new Map<string, ExecutionAggregateState>();
 
 export function upsertExecutionState(

@@ -11,13 +11,13 @@ export class N8nApi implements ICredentialType {
 
 	displayName = 'n8n API';
 
-	icon = 'file:clay.svg' as Icon;
+	icon = 'file:../icons/clay.svg' as Icon;
 
 	documentationUrl = 'https://docs.n8n.io/api/authentication/';
 
 	properties: INodeProperties[] = [
 		{
-			displayName: 'API Key',
+			displayName: 'n8n API Key',
 			name: 'apiKey',
 			type: 'string',
 			typeOptions: { password: true },
@@ -25,7 +25,7 @@ export class N8nApi implements ICredentialType {
 			description: 'The API key for the n8n instance',
 		},
 		{
-			displayName: 'Base URL',
+			displayName: 'n8n API Base URL',
 			name: 'baseUrl',
 			type: 'string',
 			default: '',

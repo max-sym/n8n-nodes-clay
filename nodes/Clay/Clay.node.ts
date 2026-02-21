@@ -21,7 +21,7 @@ import {
 
 const CLAY_TABLE_NAME = 'Clay Tables';
 const CLAY_URL_COLUMN_NAME = 'url';
-const CLAY_SLUG_COLUMN_NAME = 'name';
+const CLAY_TABLE_NAME_COLUMN_NAME = 'name';
 
 type N8nApiCredentials = {
 	apiKey: string;
@@ -38,18 +38,18 @@ type DataTableSummary = {
 	}>;
 };
 
-export class SendAndWaitMany implements INodeType {
+export class Clay implements INodeType {
 	description: INodeTypeDescription = {
-		displayName: 'Send and Wait Many',
+		displayName: 'Clay',
 		name: 'sendAndWaitMany',
-		icon: 'file:clay.svg',
+		icon: 'file:../../icons/clay.svg',
 		group: ['transform'],
 		version: 1,
-		subtitle: '={{$parameter["requestUrl"]}}',
+		subtitle: '',
 		usableAsTool: true,
 		description: 'Fan out requests and resume only after all callbacks are received',
 		defaults: {
-			name: 'Send and Wait Many',
+			name: 'Clay',
 		},
 		inputs: [NodeConnectionTypes.Main],
 		outputs: [NodeConnectionTypes.Main],
@@ -82,14 +82,6 @@ export class SendAndWaitMany implements INodeType {
 					'Choose from the list, or specify an ID using an <a href="https://docs.n8n.io/code/expressions/">expression</a>',
 			},
 			{
-				displayName: 'Callback Field Name',
-				name: 'callbackFieldName',
-				type: 'string',
-				default: 'resume_url',
-				required: true,
-				description: 'Field name to send callback URL in each outbound request body',
-			},
-			{
 				displayName: 'Item Field Name',
 				name: 'itemFieldName',
 				type: 'string',
@@ -98,21 +90,37 @@ export class SendAndWaitMany implements INodeType {
 				description: 'Field name that contains each input item JSON in outbound request body',
 			},
 			{
-				displayName: 'Max Wait Minutes',
-				name: 'maxWaitMinutes',
-				type: 'number',
-				default: 1440,
-				typeOptions: {
-					minValue: 1,
-				},
-				description: 'Maximum time to wait before the sleeping execution times out',
+				displayName: 'Options',
+				name: 'options',
+				type: 'collection',
+				default: {},
+				placeholder: 'Add option',
+				options: [
+					{
+						displayName: 'Callback Field Name',
+						name: 'callbackFieldName',
+						type: 'string',
+						default: 'resume_url',
+						description: 'Field name to send callback URL in each outbound request body',
+					},
+					{
+						displayName: 'Max Wait Minutes',
+						name: 'maxWaitMinutes',
+						type: 'number',
+						default: 30,
+						typeOptions: {
+							minValue: 1,
+						},
+						description: 'Maximum time to wait before the sleeping execution times out',
+					},
+				],
 			},
 			{
-				displayName: 'Warning',
-				name: 'warning',
-				type: 'notice',
-				default:
+				displayName:
 					'State is stored in process memory. This works reliably only in single-process deployments. Use an external store (for example Redis) for clustered or multi-instance setups.',
+				name: 'notice',
+				type: 'notice',
+				default: '',
 			},
 		],
 	};
@@ -135,7 +143,9 @@ export class SendAndWaitMany implements INodeType {
 					const urlValue =
 						typeof row[CLAY_URL_COLUMN_NAME] === 'string' ? row[CLAY_URL_COLUMN_NAME] : '';
 					const slugValue =
-						typeof row[CLAY_SLUG_COLUMN_NAME] === 'string' ? row[CLAY_SLUG_COLUMN_NAME] : '';
+						typeof row[CLAY_TABLE_NAME_COLUMN_NAME] === 'string'
+							? row[CLAY_TABLE_NAME_COLUMN_NAME]
+							: '';
 
 					if (!urlValue) {
 						continue;
@@ -157,9 +167,10 @@ export class SendAndWaitMany implements INodeType {
 
 		const items = this.getInputData();
 		const requestUrl = this.getNodeParameter('requestUrl', 0) as string;
-		const callbackFieldName = this.getNodeParameter('callbackFieldName', 0) as string;
 		const itemFieldName = this.getNodeParameter('itemFieldName', 0) as string;
-		const maxWaitMinutes = this.getNodeParameter('maxWaitMinutes', 0) as number;
+		const options = this.getNodeParameter('options', 0, {}) as IDataObject;
+		const callbackFieldName = (options.callbackFieldName as string) ?? 'resume_url';
+		const maxWaitMinutes = typeof options.maxWaitMinutes === 'number' ? options.maxWaitMinutes : 30;
 
 		if (!requestUrl) {
 			throw new NodeOperationError(this.getNode(), 'Request URL is required.');
@@ -334,7 +345,7 @@ async function findOrCreateClayTable(
 			body: {
 				name: CLAY_TABLE_NAME,
 				columns: [
-					{ name: CLAY_SLUG_COLUMN_NAME, type: 'string' },
+					{ name: CLAY_TABLE_NAME_COLUMN_NAME, type: 'string' },
 					{ name: CLAY_URL_COLUMN_NAME, type: 'string' },
 				],
 			},
