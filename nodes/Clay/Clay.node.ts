@@ -41,7 +41,7 @@ type DataTableSummary = {
 export class Clay implements INodeType {
 	description: INodeTypeDescription = {
 		displayName: 'Clay',
-		name: 'sendAndWaitMany',
+		name: 'clay',
 		icon: 'file:../../icons/clay.svg',
 		group: ['transform'],
 		version: 1,
@@ -55,7 +55,7 @@ export class Clay implements INodeType {
 		outputs: [NodeConnectionTypes.Main],
 		credentials: [
 			{
-				name: 'sendAndWaitManyN8nApi',
+				name: 'clayN8nApi',
 				required: true,
 			},
 		],
@@ -128,7 +128,7 @@ export class Clay implements INodeType {
 	methods = {
 		loadOptions: {
 			async getClayUrls(this: ILoadOptionsFunctions): Promise<INodePropertyOptions[]> {
-				const credentials = await this.getCredentials<N8nApiCredentials>('sendAndWaitManyN8nApi');
+				const credentials = await this.getCredentials<N8nApiCredentials>('clayN8nApi');
 				const baseUrl = credentials.baseUrl.replace(/\/$/, '');
 				const headers = {
 					'X-N8N-API-KEY': credentials.apiKey,

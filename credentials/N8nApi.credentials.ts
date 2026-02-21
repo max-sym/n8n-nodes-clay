@@ -7,7 +7,7 @@ import type {
 } from 'n8n-workflow';
 
 export class N8nApi implements ICredentialType {
-	name = 'sendAndWaitManyN8nApi';
+	name = 'clayN8nApi';
 
 	displayName = 'n8n API';
 
