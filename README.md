@@ -24,10 +24,25 @@ At execution time it:
 ### Parameters
 
 - **Request URL Name or ID**: Selects a URL from the Clay Tables data table.
-- **Item Field Name**: Field name used for each outbound item payload (default: `data`).
+- **Field Values**: Auto-generated inputs from the selected row's `fields` column.
 - **Options**:
   - **Callback Field Name**: Field name used to pass resume URL (default: `resume_url`).
   - **Max Wait Minutes**: Max wait before timeout (default: `30`).
+
+### Clay Tables schema
+
+The `Clay Tables` n8n data table now uses these columns:
+
+- `name`: Friendly name shown in the node selector.
+- `url`: Target enrichment webhook URL.
+- `fields`: Comma-separated list of input fields to send to Clay (for example `company_domain, company_name`).
+
+At runtime, the node reads the selected table row and builds a strict outbound payload shape:
+
+- `data`: Object containing configured `fields` from Clay Tables.
+- `resume_url` (or your configured callback field name): callback URL for Clay.
+
+If `fields` is empty, null, or undefined, no field inputs are generated and the node falls back to sending the full input item JSON in `data`.
 
 ## Important limitation
 
