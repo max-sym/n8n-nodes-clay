@@ -10,6 +10,9 @@ At execution time it:
 
 1. Reads all input items.
 2. Sends a `POST` request for each item to the selected request URL.
+
+- Requests are dispatched with bounded concurrency.
+
 3. Injects a callback URL into each outbound payload.
 4. Waits until all callback parts are received.
 5. Returns callback payloads in part order.
@@ -27,6 +30,7 @@ At execution time it:
 - **Field Values**: Auto-generated inputs from the selected row's `fields` column.
 - **Options**:
   - **Callback Field Name**: Field name used to pass resume URL (default: `resume_url`).
+  - **Max Concurrency**: Maximum number of outbound requests running at the same time (default: `5`).
   - **Max Wait Minutes**: Max wait before timeout (default: `30`).
 
 ### Clay Tables schema
