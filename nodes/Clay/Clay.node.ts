@@ -1,6 +1,7 @@
 import {
 	NodeConnectionTypes,
 	NodeOperationError,
+	sleep,
 	type IDataObject,
 	type IExecuteFunctions,
 	type ILoadOptionsFunctions,
@@ -43,6 +44,10 @@ type DataTableSummary = {
 
 type HttpRequestOptions = Parameters<ILoadOptionsFunctions['helpers']['httpRequest']>[0];
 type HttpRequester = (options: HttpRequestOptions) => Promise<unknown>;
+type BatchOptions = {
+	itemsPerBatch: number;
+	batchIntervalMs: number;
+};
 
 export class Clay implements INodeType {
 	description: INodeTypeDescription = {
@@ -136,6 +141,27 @@ export class Clay implements INodeType {
 						},
 						description: 'Maximum time to wait before the sleeping execution times out',
 					},
+					{
+						displayName: 'Items Per Batch',
+						name: 'itemsPerBatch',
+						type: 'number',
+						default: 0,
+						typeOptions: {
+							minValue: 0,
+						},
+						description: 'Number of items to send in each batch. Set to 0 to disable batching.',
+					},
+					{
+						displayName: 'Batch Interval (Ms)',
+						name: 'batchIntervalMs',
+						type: 'number',
+						default: 0,
+						typeOptions: {
+							minValue: 0,
+						},
+						description:
+							'Delay between batches in milliseconds. Used when Items Per Batch is greater than 0.',
+					},
 				],
 			},
 			{
@@ -226,6 +252,7 @@ export class Clay implements INodeType {
 		const options = this.getNodeParameter('options', 0, {}) as IDataObject;
 		const callbackFieldName = (options.callbackFieldName as string) ?? 'resume_url';
 		const maxWaitMinutes = typeof options.maxWaitMinutes === 'number' ? options.maxWaitMinutes : 30;
+		const batchOptions = getBatchOptions(options);
 
 		if (!requestUrl) {
 			throw new NodeOperationError(this.getNode(), 'Request URL is required.');
@@ -246,24 +273,28 @@ export class Clay implements INodeType {
 		const totalItems = items.length;
 		upsertExecutionState(executionId, totalItems);
 
-		await Promise.all(
-			items.map(async (item, index) => {
-				const callbackUrl = `${resumeUrl}?part=${index}&total=${totalItems}`;
-				const payloadData = buildMappedPayloadData(this, index, configuredFields, item.json as IDataObject);
+		await sendRequestsInBatches(totalItems, batchOptions, async (index) => {
+			const item = items[index];
+			const callbackUrl = `${resumeUrl}?part=${index}&total=${totalItems}`;
+			const payloadData = buildMappedPayloadData(
+				this,
+				index,
+				configuredFields,
+				item.json as IDataObject,
+			);
 
-				const body: IDataObject = {
-					data: payloadData,
-					[callbackFieldName]: callbackUrl,
-				};
+			const body: IDataObject = {
+				data: payloadData,
+				[callbackFieldName]: callbackUrl,
+			};
 
-				await this.helpers.httpRequest({
-					method: 'POST',
-					url: requestUrl,
-					body,
-					json: true,
-				});
-			}),
-		);
+			await this.helpers.httpRequest({
+				method: 'POST',
+				url: requestUrl,
+				body,
+				json: true,
+			});
+		});
 
 		const waitTill = new Date(Date.now() + maxWaitMinutes * 60 * 1000);
 		await this.putExecutionToWait(waitTill);
@@ -361,7 +392,10 @@ function buildMappedPayloadData(
 		return { ...itemJson };
 	}
 
-	const fieldValues = executeFunctions.getNodeParameter('fieldValues', itemIndex) as ResourceMapperValue;
+	const fieldValues = executeFunctions.getNodeParameter(
+		'fieldValues',
+		itemIndex,
+	) as ResourceMapperValue;
 	const mappedValues =
 		fieldValues && typeof fieldValues === 'object' && fieldValues.value
 			? (fieldValues.value as IDataObject)
@@ -409,6 +443,44 @@ function parseCommaSeparatedFields(value: string): string[] {
 		.split(',')
 		.map((field) => field.trim())
 		.filter((field) => field.length > 0);
+}
+
+function getBatchOptions(options: IDataObject): BatchOptions {
+	const itemsPerBatch =
+		typeof options.itemsPerBatch === 'number' && Number.isFinite(options.itemsPerBatch)
+			? options.itemsPerBatch
+			: 0;
+	const batchIntervalMs =
+		typeof options.batchIntervalMs === 'number' && Number.isFinite(options.batchIntervalMs)
+			? options.batchIntervalMs
+			: 0;
+
+	return {
+		itemsPerBatch,
+		batchIntervalMs,
+	};
+}
+
+async function sendRequestsInBatches(
+	totalItems: number,
+	batchOptions: BatchOptions,
+	sendRequest: (itemIndex: number) => Promise<void>,
+): Promise<void> {
+	const batchSize = batchOptions.itemsPerBatch;
+	const shouldDelayByBatch = batchSize > 0 && batchOptions.batchIntervalMs > 0;
+	const requestPromises: Array<Promise<void>> = [];
+
+	for (let itemIndex = 0; itemIndex < totalItems; itemIndex++) {
+		if (shouldDelayByBatch && itemIndex > 0) {
+			if (itemIndex % batchSize === 0) {
+				await sleep(batchOptions.batchIntervalMs);
+			}
+		}
+
+		requestPromises.push(sendRequest(itemIndex));
+	}
+
+	await Promise.all(requestPromises);
 }
 
 async function listDataTables(
