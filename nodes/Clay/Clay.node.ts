@@ -13,6 +13,7 @@ import {
 	type INodeTypeDescription,
 	type IWebhookFunctions,
 	type IWebhookResponseData,
+	sleep,
 } from 'n8n-workflow';
 
 type N8nApiCredentials = {
@@ -36,16 +37,22 @@ type ConcurrencyOptions = {
 	maxConcurrency: number;
 };
 
+type RateLimitOptions = {
+	maxRequestsPerSecond?: number;
+};
+
 type ExecutionAggregateState = {
 	requestUrl: string;
 	callbackFieldName: string;
-	resumeUrl: string;
+	callbackUrls: string[];
 	expectedParts: number;
 	maxConcurrency: number;
+	maxRequestsPerSecond?: number;
 	requestPayloads: IDataObject[];
 	nextPartToSend: number;
 	activeRequests: number;
 	parts: Map<number, IDataObject>;
+	requestTimestamps: number[];
 	createdAt: number;
 };
 
@@ -57,6 +64,7 @@ export class Clay implements INodeType {
 		clay_fields_column_name: 'fields',
 		max_while_iterations: 1_000_000,
 		max_cache_age_ms: 1 * 60 * 60 * 1000,
+		rate_limit_window_ms: 1000,
 		aggregate_cache: new Map<string, ExecutionAggregateState>(),
 	};
 
@@ -66,6 +74,7 @@ export class Clay implements INodeType {
 	): ExecutionAggregateState {
 		const state: ExecutionAggregateState = {
 			...stateInput,
+			requestTimestamps: stateInput.requestTimestamps ?? [],
 			createdAt: Date.now(),
 		};
 
@@ -113,9 +122,10 @@ export class Clay implements INodeType {
 			{
 				name: 'default',
 				httpMethod: 'POST',
-				path: '',
+				path: '={{ $nodeId }}',
 				responseMode: 'onReceived',
 				restartWebhook: true,
+				isFullPath: true,
 			},
 		],
 		properties: [
@@ -179,6 +189,16 @@ export class Clay implements INodeType {
 							minValue: 1,
 						},
 						description: 'Maximum number of outbound requests running at the same time',
+					},
+					{
+						displayName: 'Max Requests per Second',
+						name: 'maxRequestsPerSecond',
+						type: 'number',
+						default: 0,
+						typeOptions: {
+							minValue: 0,
+						},
+						description: 'Rate limit for outbound requests (0 for unlimited)',
 					},
 					{
 						displayName: 'Max Wait Minutes',
@@ -280,6 +300,7 @@ export class Clay implements INodeType {
 		const callbackFieldName = (options.callbackFieldName as string) ?? 'resume_url';
 		const maxWaitMinutes = typeof options.maxWaitMinutes === 'number' ? options.maxWaitMinutes : 30;
 		const concurrencyOptions = Clay.getConcurrencyOptions(options);
+		const rateLimitOptions = Clay.getRateLimitOptions(options);
 
 		if (!requestUrl) {
 			throw new NodeOperationError(this.getNode(), 'Request URL is required.');
@@ -288,11 +309,6 @@ export class Clay implements INodeType {
 		const executionId = this.getExecutionId();
 		if (!executionId) {
 			throw new NodeOperationError(this.getNode(), 'Execution ID is not available.');
-		}
-
-		const resumeUrl = this.evaluateExpression('{{$execution.resumeUrl}}', 0) as string;
-		if (!resumeUrl) {
-			throw new NodeOperationError(this.getNode(), 'Resume URL is not available.');
 		}
 
 		const configuredFields = await Clay.getConfiguredFieldsForRequestUrl(this, requestUrl);
@@ -306,20 +322,27 @@ export class Clay implements INodeType {
 			Clay.buildMappedPayloadData(this, index, configuredFields, item.json as IDataObject),
 		);
 
+		this.setSignatureValidationRequired();
+		const callbackUrls = requestPayloads.map((_, index) =>
+			this.getSignedResumeUrl({ part: String(index) }),
+		);
+
 		const state = Clay.upsertExecutionState(executionId, {
 			requestUrl,
 			callbackFieldName,
-			resumeUrl,
+			callbackUrls,
 			expectedParts: totalItems,
 			maxConcurrency: concurrencyOptions.maxConcurrency,
+			maxRequestsPerSecond: rateLimitOptions.maxRequestsPerSecond,
 			requestPayloads,
 			nextPartToSend: 0,
 			activeRequests: 0,
 			parts: new Map<number, IDataObject>(),
+			requestTimestamps: [],
 		});
 
 		const httpRequest = this.helpers.httpRequest.bind(this.helpers) as HttpRequester;
-		await Clay.dispatchQueuedRequests(state, httpRequest);
+		await Clay.prototype.dispatchQueuedRequests.call(this, state, httpRequest);
 
 		const waitTill = new Date(Date.now() + maxWaitMinutes * 60 * 1000);
 		await this.putExecutionToWait(waitTill);
@@ -400,7 +423,7 @@ export class Clay implements INodeType {
 			state.activeRequests = Math.max(0, state.activeRequests - 1);
 
 			const httpRequest = this.helpers.httpRequest.bind(this.helpers) as HttpRequester;
-			await Clay.dispatchQueuedRequests(state, httpRequest);
+			await Clay.prototype.dispatchQueuedRequests.call(this, state, httpRequest);
 		}
 
 		if (state.parts.size >= state.expectedParts) {
@@ -520,7 +543,26 @@ export class Clay implements INodeType {
 		};
 	}
 
-	private static async dispatchQueuedRequests(
+	private static getRateLimitOptions(options: IDataObject): RateLimitOptions {
+		const rawMaxRequestsPerSecond = options.maxRequestsPerSecond;
+		const maxRequestsPerSecond =
+			typeof rawMaxRequestsPerSecond === 'number' && Number.isFinite(rawMaxRequestsPerSecond)
+				? Math.floor(rawMaxRequestsPerSecond)
+				: undefined;
+
+		if (!maxRequestsPerSecond || maxRequestsPerSecond <= 0) {
+			return {
+				maxRequestsPerSecond: undefined,
+			};
+		}
+
+		return {
+			maxRequestsPerSecond,
+		};
+	}
+
+	private async dispatchQueuedRequests(
+		this: IExecuteFunctions | IWebhookFunctions,
 		state: ExecutionAggregateState,
 		httpRequest: HttpRequester,
 	): Promise<void> {
@@ -540,7 +582,7 @@ export class Clay implements INodeType {
 			state.activeRequests += 1;
 
 			try {
-				await Clay.sendRequestForPart(state, partIndex, httpRequest);
+				await Clay.prototype.sendRequestForPart.call(this, state, partIndex, httpRequest);
 			} catch (error) {
 				state.nextPartToSend = Math.max(partIndex, state.nextPartToSend - 1);
 				state.activeRequests = Math.max(0, state.activeRequests - 1);
@@ -549,17 +591,77 @@ export class Clay implements INodeType {
 		}
 	}
 
-	private static async sendRequestForPart(
+	private async enforceRateLimit(
+		this: IExecuteFunctions | IWebhookFunctions,
+		state: ExecutionAggregateState,
+	): Promise<void> {
+		const maxRequestsPerSecond = state.maxRequestsPerSecond;
+		if (
+			!maxRequestsPerSecond ||
+			!Number.isFinite(maxRequestsPerSecond) ||
+			maxRequestsPerSecond <= 0
+		) {
+			return;
+		}
+
+		const timestamps = state.requestTimestamps ?? [];
+		state.requestTimestamps = timestamps;
+		// let iterationCount = 0;
+
+		await sleep(1000);
+
+		// while (true) {
+		// 	iterationCount += 1;
+		// 	if (iterationCount > Clay.config.max_while_iterations) {
+		// 		throw new ApplicationError('Loop guard exceeded in enforceRateLimit');
+		// 	}
+
+		// 	const now = Date.now();
+		// 	const windowStart = now - Clay.config.rate_limit_window_ms;
+
+		// 	while (timestamps.length && timestamps[0] <= windowStart) {
+		// 		timestamps.shift();
+		// 	}
+
+		// 	if (timestamps.length < maxRequestsPerSecond) {
+		// 		timestamps.push(now);
+		// 		return;
+		// 	}
+
+		// 	const oldestTimestamp = timestamps[0] ?? now;
+		// 	const waitMs = Math.max(0, Clay.config.rate_limit_window_ms - (now - oldestTimestamp));
+
+		// 	if (waitMs > 0) {
+		// 		this.logger?.warn(
+		// 			`Clay rate limit reached; delaying outbound request dispatch ${JSON.stringify({
+		// 				waitMs,
+		// 				maxRequestsPerSecond,
+		// 				requestsInCurrentWindow: timestamps.length,
+		// 			})}`,
+		// 		);
+		// 		await sleep(waitMs);
+		// 		continue;
+		// 	}
+		// }
+	}
+
+	private async sendRequestForPart(
+		this: IExecuteFunctions | IWebhookFunctions,
 		state: ExecutionAggregateState,
 		partIndex: number,
 		httpRequest: HttpRequester,
 	): Promise<void> {
 		const payloadData = state.requestPayloads[partIndex] ?? {};
-		const callbackUrl = `${state.resumeUrl}?part=${partIndex}`;
+		const callbackUrl = state.callbackUrls[partIndex];
+		if (!callbackUrl) {
+			throw new ApplicationError(`Missing callback URL for part ${partIndex}`);
+		}
 		const body: IDataObject = {
 			data: payloadData,
 			[state.callbackFieldName]: callbackUrl,
 		};
+
+		await Clay.prototype.enforceRateLimit.call(this, state);
 
 		await httpRequest({
 			method: 'POST',
